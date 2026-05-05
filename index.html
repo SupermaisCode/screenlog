@@ -273,6 +273,14 @@
         }
         .filter-select:focus { border-color: var(--accent); }
         .filter-select option { background: var(--surface); color: var(--fg); }
+
+        /* ── year filter active highlight ── */
+        .filter-select.year-active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background-color: var(--accent-glow);
+        }
+
         .results-count {
             font-size: 12px;
             color: var(--muted);
@@ -924,6 +932,10 @@
                 <select class="filter-select" id="genre-filter" aria-label="Filter by genre">
                     <option value="all">All Genres</option>
                 </select>
+                <!-- ★ NEW: Year filter -->
+                <select class="filter-select" id="year-filter" aria-label="Filter by year">
+                    <option value="all">All Years</option>
+                </select>
                 <select class="filter-select" id="sort-select" aria-label="Sort by">
                     <option value="dateAdded-desc">Newest Added</option>
                     <option value="dateAdded-asc">Oldest Added</option>
@@ -977,14 +989,15 @@
             status: 'all',
             type: 'all',
             genre: 'all',
+            year: 'all',       // ★ NEW
             sort: 'dateAdded-desc'
         },
         view: 'grid',
-        modal: null // { mode: 'view'|'add'|'edit'|'delete', item?: object }
+        modal: null
     };
 
     /* ============================================
-       SAMPLE DATA (fallback when no data.json)
+       SAMPLE DATA
        ============================================ */
     const SAMPLE_DATA = [
         { id: 1, title: "Inception", year: 2010, type: "movie", status: "watched", rating: 9, genres: ["Sci-Fi", "Thriller", "Action"], poster: "https://image.tmdb.org/t/p/w500/8IB2e4r4oVhHnANbnm7O3Tj6tF8.jpg", dateWatched: "2024-03-15", dateAdded: "2024-03-15", notes: "Nolan at his best. The dream layers are mind-bending." },
@@ -1005,7 +1018,6 @@
        DATA MANAGEMENT
        ============================================ */
     function loadData() {
-        // Try fetching data.json first (works on GitHub Pages)
         return fetch('data.json')
             .then(r => {
                 if (!r.ok) throw new Error('No data.json');
@@ -1017,7 +1029,6 @@
                 return data;
             })
             .catch(() => {
-                // Fallback: localStorage or sample data
                 const stored = localStorage.getItem('screenlog_data');
                 if (stored) {
                     STATE.data = JSON.parse(stored);
@@ -1067,32 +1078,36 @@
         return [...genres].sort();
     }
 
+    // ★ NEW: collect unique years, newest first
+    function getUniqueYears() {
+        const years = new Set();
+        STATE.data.forEach(d => { if (d.year) years.add(d.year); });
+        return [...years].sort((a, b) => b - a);
+    }
+
     function applyFilters() {
         const f = STATE.filters;
         let result = [...STATE.data];
 
-        // Search
         if (f.search) {
             const q = f.search.toLowerCase();
             result = result.filter(d => d.title.toLowerCase().includes(q));
         }
-
-        // Status
         if (f.status !== 'all') {
             result = result.filter(d => d.status === f.status);
         }
-
-        // Type
         if (f.type !== 'all') {
             result = result.filter(d => d.type === f.type);
         }
-
-        // Genre
         if (f.genre !== 'all') {
             result = result.filter(d => (d.genres || []).includes(f.genre));
         }
+        // ★ NEW: year filter
+        if (f.year !== 'all') {
+            const y = parseInt(f.year, 10);
+            result = result.filter(d => d.year === y);
+        }
 
-        // Sort
         const [field, dir] = f.sort.split('-');
         const mult = dir === 'desc' ? -1 : 1;
         result.sort((a, b) => {
@@ -1160,6 +1175,19 @@
     }
 
     /* ============================================
+       RENDER: YEAR FILTER  ★ NEW
+       ============================================ */
+    function renderYearFilter() {
+        const years = getUniqueYears();
+        const sel = document.getElementById('year-filter');
+        const current = sel.value;
+        sel.innerHTML = '<option value="all">All Years</option>' +
+            years.map(y => `<option value="${y}"${String(y) === current ? ' selected' : ''}>${y}</option>`).join('');
+        // Highlight when active
+        sel.classList.toggle('year-active', STATE.filters.year !== 'all');
+    }
+
+    /* ============================================
        RENDER: CARDS
        ============================================ */
     function renderCards() {
@@ -1177,9 +1205,7 @@
             return;
         }
 
-        // Use DocumentFragment for performance
         const frag = document.createDocumentFragment();
-
         STATE.filtered.forEach((item, i) => {
             const card = document.createElement('div');
             card.className = 'card';
@@ -1189,12 +1215,7 @@
             card.setAttribute('role', 'button');
             card.setAttribute('aria-label', `${item.title} (${item.year})`);
 
-            if (STATE.view === 'list') {
-                card.innerHTML = buildListHTML(item);
-            } else {
-                card.innerHTML = buildCardHTML(item);
-            }
-
+            card.innerHTML = STATE.view === 'list' ? buildListHTML(item) : buildCardHTML(item);
             card.addEventListener('click', () => openModal('view', item));
             card.addEventListener('keydown', e => { if (e.key === 'Enter') openModal('view', item); });
             frag.appendChild(card);
@@ -1285,7 +1306,6 @@
         backdrop.classList.add('open');
         document.body.style.overflow = 'hidden';
 
-        // Focus first input in forms
         if (mode === 'add' || mode === 'edit') {
             setTimeout(() => {
                 const firstInput = body.querySelector('.form-input');
@@ -1311,9 +1331,7 @@
         const typeLabel = item.type === 'tv' ? 'TV Show' : 'Movie';
         const statusLabel = item.status === 'watched' ? 'Watched' : 'Wish List';
         const statusClass = item.status === 'watched' ? 'status-watched' : 'status-wish';
-        const genresHTML = (item.genres || []).map(g =>
-            `<span class="detail-genre">${g}</span>`
-        ).join('');
+        const genresHTML = (item.genres || []).map(g => `<span class="detail-genre">${g}</span>`).join('');
         const dateWatchedHTML = item.dateWatched
             ? `<div><span>Watched: </span><strong>${formatDate(item.dateWatched)}</strong></div>`
             : '';
@@ -1493,7 +1511,6 @@
             try {
                 const data = JSON.parse(e.target.result);
                 if (!Array.isArray(data)) throw new Error('Not an array');
-                // Basic validation
                 data.forEach(item => {
                     if (!item.title) throw new Error('Entry missing title');
                     if (!item.id) item.id = getNextId();
@@ -1550,6 +1567,7 @@
     function renderAll() {
         renderStats();
         renderGenreFilter();
+        renderYearFilter();   // ★ NEW
         applyFilters();
         renderCards();
     }
@@ -1558,8 +1576,9 @@
        EVENT LISTENERS
        ============================================ */
     function initEventListeners() {
-        // View toggle
         const grid = document.getElementById('cards-grid');
+
+        // View toggle
         document.getElementById('btn-grid').addEventListener('click', () => {
             STATE.view = 'grid';
             grid.classList.remove('list-view');
@@ -1574,7 +1593,6 @@
             document.getElementById('btn-grid').classList.remove('active');
             renderCards();
         });
-        // Default active
         document.getElementById('btn-grid').classList.add('active');
 
         // Add buttons
@@ -1639,6 +1657,14 @@
             renderCards();
         });
 
+        // ★ NEW: Year filter
+        document.getElementById('year-filter').addEventListener('change', (e) => {
+            STATE.filters.year = e.target.value;
+            e.target.classList.toggle('year-active', e.target.value !== 'all');
+            applyFilters();
+            renderCards();
+        });
+
         // Sort
         document.getElementById('sort-select').addEventListener('change', (e) => {
             STATE.filters.sort = e.target.value;
@@ -1655,29 +1681,24 @@
             if (e.key === 'Escape' && STATE.modal) closeModal();
         });
 
-        // Modal body delegation (dynamic content)
+        // Modal body delegation
         document.getElementById('modal-body').addEventListener('click', (e) => {
-            // Edit button in view mode
             if (e.target.closest('#modal-edit-btn')) {
                 openModal('edit', STATE.modal.item);
                 return;
             }
-            // Delete button in view mode
             if (e.target.closest('#modal-delete-btn')) {
                 openModal('delete', STATE.modal.item);
                 return;
             }
-            // Cancel in form
             if (e.target.closest('#form-cancel')) {
                 closeModal();
                 return;
             }
-            // Cancel delete
             if (e.target.closest('#cancel-delete')) {
                 closeModal();
                 return;
             }
-            // Confirm delete
             if (e.target.closest('#confirm-delete')) {
                 const title = STATE.modal.item.title;
                 deleteItem(STATE.modal.item.id);
@@ -1686,7 +1707,6 @@
                 showToast(`"${title}" deleted`, 'success');
                 return;
             }
-            // Rating buttons
             if (e.target.closest('.rating-btn')) {
                 const btn = e.target.closest('.rating-btn');
                 document.querySelectorAll('#f-rating .rating-btn').forEach(b => b.classList.remove('selected'));
@@ -1697,9 +1717,7 @@
 
         // Form submit
         document.getElementById('modal-body').addEventListener('submit', (e) => {
-            if (e.target.id === 'entry-form') {
-                handleFormSubmit(e);
-            }
+            if (e.target.id === 'entry-form') handleFormSubmit(e);
         });
 
         // Status toggle shows/hides rating + date fields
@@ -1722,9 +1740,7 @@
        ============================================ */
     function init() {
         initEventListeners();
-        loadData().then(() => {
-            renderAll();
-        });
+        loadData().then(() => renderAll());
     }
 
     document.addEventListener('DOMContentLoaded', init);
